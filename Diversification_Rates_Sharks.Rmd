@@ -1,0 +1,90 @@
+---
+title: "Diversification_Rate_Sharks"
+author: "Jay H. Matsushiba"
+date: "2023-09-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sf)
+library(tidyverse)
+```
+
+
+
+```{r}
+# Mean Diversity Richness from Cecelia Muirhead
+species_dr <- read.csv("RawData/506_shark_species_meanDR.csv")
+# species presence matrix 
+species_matrix <- read.csv("RawData/2023-09-07_presence_matrix.csv")
+# rename colnames to match species_dr
+colnames(species_matrix) <- gsub("\\.", "_", colnames(species_matrix) )
+# hexagon grid cells 
+hexagons <- readRDS("RawData/hexagons.rds")
+
+# list of species with DR
+species_list <- species_dr$Species
+# select sharks that we have DR for 
+species_matrix_sharks <- species_matrix[,c("area_int", species_list)]
+# create dataframe with only area_int, so hex ID
+species_matrix_output <- species_matrix["area_int"]
+
+# loop through species list to create new speices_matrix_output
+for (specie in species_list) {
+  # species range size in number of grid cells 
+  species_hex_size <- species_matrix_sharks[[specie]] %>% sum()
+  # species mean diversification rate from 506_shark_species_meanDR.csv
+  species_meanDR <- species_dr[species_dr$Species == specie, "meanDR"]
+  # calculate the species specific value, species DR weighted by inverse of range size 
+  species_value <- species_meanDR * (1/species_hex_size)
+  
+  # multiply presences (1) in species_matrix_sharks by species value 
+  # can add as new column, since deriving from same dataframe so order of rows is maintained
+  species_matrix_output[[specie]] <- species_matrix_sharks[[specie]] * species_value
+}
+
+# create new dataframe for mean DR by cells 
+cells_df <- species_matrix["area_int"]
+# create column with 0 values for now
+cells_df$meanDR <- 0
+# loop through cells_df (so loop through each row representing DR values from species in the cell)
+for (cell in cells_df$area_int) {
+  # get vector of row values by grid cell ID
+  row_vals <- species_matrix_output[species_matrix_output$area_int == cell,-1] %>% as.numeric()
+  # Filter vector for values above 0 (species values present)
+  row_vals_filtered <- Filter(function(x) x > 0, row_vals)
+  # calculate geometric mean by grid cell 
+  cell_meanDR <- exp(mean(log(row_vals_filtered))) 
+  # assign meanDR value to cells_df 
+  cells_df[cells_df$area_int == cell, "meanDR"] <- cell_meanDR
+}
+
+hex_meanDR <- merge(cells_df, hexagons, by.x = "area_int", by.y = "NEW_FID") %>%
+  na.omit() %>%
+  st_as_sf() %>%
+  mutate(log_meanDR = log(meanDR))
+write.csv(hex_meanDR, "ProcessedData/2023-09-13_meanDR_hex_cell.csv")
+
+ggplot() +
+  geom_sf(data = hex_meanDR, aes(fill = log_meanDR, color = log_meanDR)) +
+  scale_fill_viridis_c() +
+  scale_color_viridis_c() +
+  theme_bw()
+ggsave("log_meanDR.pdf")
+```
+
+
+```{r}
+  # species range size in number of grid cells 
+  species_hex_size <- species_matrix_sharks["Aculeola_nigra"] %>% sum()
+  # species mean diversification rate from 506_shark_species_meanDR.csv
+  species_meanDR <- species_dr[species_dr$Species == "Aculeola_nigra", "meanDR"]
+  # calculate the species specific value, species DR weighted by inverse of range size 
+  species_value <- species_meanDR * (1/species_hex_size)
+  
+  # multiply presences (1) in species_matrix_sharks by species value 
+  # can add as new column, since deriving from same dataframe so order of rows is maintained
+  species_matrix_output["Aculeola_nigra"] <- species_matrix_sharks["Aculeola_nigra"] * species_value
+```
+
